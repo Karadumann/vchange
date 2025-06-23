@@ -141,6 +141,7 @@ class App(ctk.CTk):
         self.voice_changer = VoiceChanger()
         self.voice_changer.volume_callback = self.update_volume_meter
         self.presets = {}
+        self.selected_output_device_index = None
         self.default_presets = {
             "Normal": {"pitch": 0, "high_pass": 0, "low_pass": 22000, "reverb_on": False, "room_size": 0, "chorus_on": False, "delay_on": False},
             "Lower Timbre": {"pitch": -2, "high_pass": 80, "low_pass": 8000, "reverb_on": False, "room_size": 0, "chorus_on": False, "delay_on": False},
@@ -161,22 +162,23 @@ class App(ctk.CTk):
         # --- Top Frame for Global Controls ---
         self.top_frame = ctk.CTkFrame(self)
         self.top_frame.grid(row=0, column=0, padx=10, pady=(10,0), sticky="ew")
+        self.top_frame.grid_columnconfigure(1, weight=1)
 
         devices = self.voice_changer.get_devices()
         input_devices = {dev['name']: dev['index'] for dev in devices if dev['maxInputChannels'] > 0}
         output_devices = {dev['name']: dev['index'] for dev in devices if dev['maxOutputChannels'] > 0}
         
-        ctk.CTkLabel(self.top_frame, text="Input:").pack(side="left", padx=(10,5))
-        self.input_menu = ctk.CTkOptionMenu(self.top_frame, values=list(input_devices.keys()), command=self.voice_changer.set_input_device, width=150)
-        self.input_menu.pack(side="left", padx=(0,10))
+        ctk.CTkLabel(self.top_frame, text="Input:").grid(row=0, column=0, padx=(10,5), pady=5)
+        self.input_menu = ctk.CTkOptionMenu(self.top_frame, values=list(input_devices.keys()), command=self.voice_changer.set_input_device)
+        self.input_menu.grid(row=0, column=1, padx=(0,10), pady=5, sticky="ew")
         
-        ctk.CTkLabel(self.top_frame, text="Output:").pack(side="left", padx=(10,5))
-        self.output_menu = ctk.CTkOptionMenu(self.top_frame, values=list(output_devices.keys()), command=self.voice_changer.set_output_device, width=150)
-        self.output_menu.pack(side="left", padx=(0,10))
+        ctk.CTkLabel(self.top_frame, text="Output:").grid(row=1, column=0, padx=(10,5), pady=5)
+        self.output_menu = ctk.CTkOptionMenu(self.top_frame, values=list(output_devices.keys()), command=self.on_output_device_select)
+        self.output_menu.grid(row=1, column=1, padx=(0,10), pady=5, sticky="ew")
         
         self.volume_meter = ctk.CTkProgressBar(self.top_frame, progress_color="green", orientation="horizontal")
         self.volume_meter.set(0)
-        self.volume_meter.pack(side="left", padx=10, expand=True, fill="x")
+        self.volume_meter.grid(row=2, column=0, columnspan=2, padx=10, pady=(10,10), sticky="ew")
 
         # --- Tab View ---
         self.tab_view = ctk.CTkTabview(self)
@@ -229,16 +231,21 @@ class App(ctk.CTk):
         self.footer_frame.grid_columnconfigure(0, weight=1)
 
         self.status_label = ctk.CTkLabel(self.footer_frame, text="Status: Off", font=("Arial", 16))
-        self.status_label.pack(pady=(10,5))
+        self.status_label.grid(row=0, column=0, columnspan=2, pady=(10,5))
+
         self.button_frame = ctk.CTkFrame(self.footer_frame, fg_color="transparent")
-        self.button_frame.pack(pady=5, padx=10, fill="x")
+        self.button_frame.grid(row=1, column=0, columnspan=2, sticky="ew")
         self.button_frame.grid_columnconfigure((0,1), weight=1)
         self.start_button = ctk.CTkButton(self.button_frame, text="Start", command=self.start_voice_changer)
         self.start_button.grid(row=0, column=0, padx=5, pady=5, sticky="ew")
         self.stop_button = ctk.CTkButton(self.button_frame, text="Stop", command=self.stop_voice_changer, state="disabled")
         self.stop_button.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
         
+        self.test_switch = ctk.CTkSwitch(self.footer_frame, text="Test My Voice", command=self.toggle_test_mode)
+        self.test_switch.grid(row=2, column=0, columnspan=2, padx=10, pady=10)
+
         self.load_presets()
+        self.on_output_device_select(self.output_menu.get())
 
     def _update_all_effects(self, *args):
         pitch = self.pitch_slider.get()
@@ -262,6 +269,36 @@ class App(ctk.CTk):
     def update_volume_meter(self, rms_val):
         normalized_volume = min(rms_val / 5000.0, 1.0)
         self.after(0, lambda: self.volume_meter.set(normalized_volume))
+
+    def on_output_device_select(self, device_name):
+        devices = self.voice_changer.get_devices()
+        output_devices = {dev['name']: dev['index'] for dev in devices if dev['maxOutputChannels'] > 0}
+        self.selected_output_device_index = output_devices.get(device_name)
+        
+        if self.test_switch.get() == 0:
+            was_active = self.voice_changer.stream_active
+            if was_active: self.voice_changer.stop()
+            self.voice_changer.set_output_device(self.selected_output_device_index)
+            if was_active: self.voice_changer.start()
+
+    def toggle_test_mode(self):
+        is_testing = self.test_switch.get() == 1
+        was_active = self.voice_changer.stream_active
+        
+        if was_active:
+            self.voice_changer.stop()
+
+        if is_testing:
+            default_speaker_index = self.voice_changer.p.get_default_output_device_info()['index']
+            self.voice_changer.set_output_device(default_speaker_index)
+            self.output_menu.configure(state="disabled")
+        else:
+            self.voice_changer.set_output_device(self.selected_output_device_index)
+            if not self.voice_changer.stream_active:
+                 self.output_menu.configure(state="normal")
+
+        if was_active:
+            self.voice_changer.start()
 
     def apply_preset_by_name(self, name):
         if name in self.presets:
@@ -370,7 +407,8 @@ class App(ctk.CTk):
         self.start_button.configure(state="normal")
         self.stop_button.configure(state="disabled")
         self.input_menu.configure(state="normal")
-        self.output_menu.configure(state="normal")
+        if self.test_switch.get() == 0:
+            self.output_menu.configure(state="normal")
         self.tab_view.configure(state="normal")
         self.presets_frame.configure(state="normal")
 
