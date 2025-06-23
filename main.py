@@ -140,82 +140,92 @@ class App(ctk.CTk):
         }
 
         self.title("V-Change")
-        self.geometry("500x750")
+        self.geometry("500x600")
+        self.minsize(400, 500)
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
         ctk.set_appearance_mode("dark")
 
-        self.main_frame = ctk.CTkFrame(self)
-        self.main_frame.pack(padx=20, pady=20, fill="both", expand=True)
+        self.grid_rowconfigure(0, weight=1)
+        self.grid_columnconfigure(0, weight=1)
 
+        self.scroll_frame = ctk.CTkScrollableFrame(self)
+        self.scroll_frame.grid(row=0, column=0, padx=10, pady=(10, 0), sticky="nsew")
+        
         devices = self.voice_changer.get_devices()
         input_devices = {dev['name']: dev['index'] for dev in devices if dev['maxInputChannels'] > 0}
         output_devices = {dev['name']: dev['index'] for dev in devices if dev['maxOutputChannels'] > 0}
         
-        ctk.CTkLabel(self.main_frame, text="Input Device (Microphone):").pack(anchor="w", padx=10)
-        self.input_menu = ctk.CTkOptionMenu(self.main_frame, values=list(input_devices.keys()), command=self.voice_changer.set_input_device)
+        ctk.CTkLabel(self.scroll_frame, text="Input Device (Microphone):").pack(anchor="w", padx=10, pady=(5,0))
+        self.input_menu = ctk.CTkOptionMenu(self.scroll_frame, values=list(input_devices.keys()), command=self.voice_changer.set_input_device)
         self.input_menu.pack(padx=10, pady=(0, 10), fill="x")
         
-        ctk.CTkLabel(self.main_frame, text="Output Device (Speaker/Virtual Cable):").pack(anchor="w", padx=10)
-        self.output_menu = ctk.CTkOptionMenu(self.main_frame, values=list(output_devices.keys()), command=self.voice_changer.set_output_device)
-        self.output_menu.pack(padx=10, pady=(0, 20), fill="x")
+        ctk.CTkLabel(self.scroll_frame, text="Output Device (Speaker/Virtual Cable):").pack(anchor="w", padx=10)
+        self.output_menu = ctk.CTkOptionMenu(self.scroll_frame, values=list(output_devices.keys()), command=self.voice_changer.set_output_device)
+        self.output_menu.pack(padx=10, pady=(0, 15), fill="x")
         
-        ctk.CTkLabel(self.main_frame, text="Input Volume:").pack(anchor="w", padx=10, pady=(10,0))
-        self.volume_meter = ctk.CTkProgressBar(self.main_frame, progress_color="green")
+        ctk.CTkLabel(self.scroll_frame, text="Input Volume:").pack(anchor="w", padx=10)
+        self.volume_meter = ctk.CTkProgressBar(self.scroll_frame, progress_color="green")
         self.volume_meter.set(0)
-        self.volume_meter.pack(padx=10, pady=(0,20), fill="x")
+        self.volume_meter.pack(padx=10, pady=(0,15), fill="x")
 
-        self.controls_frame = ctk.CTkFrame(self.main_frame)
+        self.controls_frame = ctk.CTkFrame(self.scroll_frame)
         self.controls_frame.pack(fill="x", padx=10, pady=10)
         
         self.pitch_label = ctk.CTkLabel(self.controls_frame, text="Pitch Shift: 0.0")
         self.pitch_label.pack()
         self.pitch_slider = ctk.CTkSlider(self.controls_frame, from_=-12, to=12, number_of_steps=48, command=self._update_all_effects)
-        self.pitch_slider.set(0)
         self.pitch_slider.pack(padx=10, pady=(0,10), fill="x")
 
         self.reverb_label = ctk.CTkLabel(self.controls_frame, text="Reverb Room Size: 0.0")
         self.reverb_label.pack()
         self.reverb_slider = ctk.CTkSlider(self.controls_frame, from_=0, to=1, command=self._update_all_effects)
-        self.reverb_slider.set(0)
         self.reverb_slider.pack(padx=10, pady=(0,10), fill="x")
 
         self.effects_frame = ctk.CTkFrame(self.controls_frame, fg_color="transparent")
         self.effects_frame.pack(pady=10)
         self.reverb_switch = ctk.CTkSwitch(self.effects_frame, text="Reverb", command=self._update_all_effects)
-        self.reverb_switch.pack(side="left", padx=10)
+        self.reverb_switch.pack(side="left", padx=10, expand=True)
         self.chorus_switch = ctk.CTkSwitch(self.effects_frame, text="Chorus", command=self._update_all_effects)
-        self.chorus_switch.pack(side="left", padx=10)
+        self.chorus_switch.pack(side="left", padx=10, expand=True)
         self.delay_switch = ctk.CTkSwitch(self.effects_frame, text="Delay", command=self._update_all_effects)
-        self.delay_switch.pack(side="left", padx=10)
+        self.delay_switch.pack(side="left", padx=10, expand=True)
         
-        self.presets_frame = ctk.CTkFrame(self.main_frame)
+        self.presets_frame = ctk.CTkFrame(self.scroll_frame)
         self.presets_frame.pack(fill="x", padx=10, pady=10)
         
         ctk.CTkLabel(self.presets_frame, text="Quick Presets").pack()
         self.quick_presets_frame = ctk.CTkFrame(self.presets_frame, fg_color="transparent")
-        self.quick_presets_frame.pack(pady=(5,10))
-        ctk.CTkButton(self.quick_presets_frame, text="Normal", command=lambda: self.apply_preset_by_name("Normal")).pack(side="left", padx=5)
-        ctk.CTkButton(self.quick_presets_frame, text="Deep", command=lambda: self.apply_preset_by_name("Deep")).pack(side="left", padx=5)
-        ctk.CTkButton(self.quick_presets_frame, text="High", command=lambda: self.apply_preset_by_name("High")).pack(side="left", padx=5)
-        ctk.CTkButton(self.quick_presets_frame, text="Alien", command=lambda: self.apply_preset_by_name("Alien")).pack(side="left", padx=5)
-        ctk.CTkButton(self.quick_presets_frame, text="Spacious", command=lambda: self.apply_preset_by_name("Spacious")).pack(side="left", padx=5)
+        self.quick_presets_frame.pack(pady=(5,10), fill="x")
+        self.quick_presets_frame.grid_columnconfigure((0, 1, 2), weight=1)
+        ctk.CTkButton(self.quick_presets_frame, text="Normal", command=lambda: self.apply_preset_by_name("Normal")).grid(row=0, column=0, padx=2, pady=2, sticky="ew")
+        ctk.CTkButton(self.quick_presets_frame, text="Deep", command=lambda: self.apply_preset_by_name("Deep")).grid(row=0, column=1, padx=2, pady=2, sticky="ew")
+        ctk.CTkButton(self.quick_presets_frame, text="High", command=lambda: self.apply_preset_by_name("High")).grid(row=0, column=2, padx=2, pady=2, sticky="ew")
+        ctk.CTkButton(self.quick_presets_frame, text="Alien", command=lambda: self.apply_preset_by_name("Alien")).grid(row=1, column=0, padx=2, pady=2, sticky="ew")
+        ctk.CTkButton(self.quick_presets_frame, text="Spacious", command=lambda: self.apply_preset_by_name("Spacious")).grid(row=1, column=1, columnspan=2, padx=2, pady=2, sticky="ew")
 
         ctk.CTkLabel(self.presets_frame, text="All Presets (Load/Save)").pack()
         self.preset_menu = ctk.CTkOptionMenu(self.presets_frame, values=["Normal"], command=self.apply_preset_by_name)
         self.preset_menu.pack(pady=5, padx=10, fill="x")
         
         self.preset_buttons_frame = ctk.CTkFrame(self.presets_frame, fg_color="transparent")
-        ctk.CTkButton(self.preset_buttons_frame, text="Save Current", command=self.save_current_preset).pack(side="left", padx=5)
-        ctk.CTkButton(self.preset_buttons_frame, text="Delete Preset...", command=self.open_delete_preset_dialog).pack(side="left", padx=5)
+        self.preset_buttons_frame.pack(pady=5, padx=10, fill="x")
+        self.preset_buttons_frame.grid_columnconfigure((0, 1), weight=1)
+        ctk.CTkButton(self.preset_buttons_frame, text="Save Current", command=self.save_current_preset).grid(row=0, column=0, padx=(0, 5), sticky="ew")
+        ctk.CTkButton(self.preset_buttons_frame, text="Delete Preset...", command=self.open_delete_preset_dialog).grid(row=0, column=1, padx=(5, 0), sticky="ew")
 
-        self.status_label = ctk.CTkLabel(self.main_frame, text="Status: Off", font=("Arial", 16))
-        self.status_label.pack(pady=10)
-        self.button_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        self.button_frame.pack(pady=10)
+        self.footer_frame = ctk.CTkFrame(self, height=100)
+        self.footer_frame.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
+        self.footer_frame.grid_columnconfigure(0, weight=1)
+
+        self.status_label = ctk.CTkLabel(self.footer_frame, text="Status: Off", font=("Arial", 16))
+        self.status_label.pack(pady=(10,5))
+        self.button_frame = ctk.CTkFrame(self.footer_frame, fg_color="transparent")
+        self.button_frame.pack(pady=5, padx=10, fill="x")
+        self.button_frame.grid_columnconfigure((0,1), weight=1)
         self.start_button = ctk.CTkButton(self.button_frame, text="Start", command=self.start_voice_changer)
-        self.start_button.pack(side="left", padx=5)
+        self.start_button.grid(row=0, column=0, padx=5, pady=5, sticky="ew")
         self.stop_button = ctk.CTkButton(self.button_frame, text="Stop", command=self.stop_voice_changer, state="disabled")
-        self.stop_button.pack(side="left", padx=5)
+        self.stop_button.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
         
         self.load_presets()
 
@@ -351,6 +361,7 @@ class App(ctk.CTk):
         self.stop_button.configure(state="normal")
         self.input_menu.configure(state="disabled")
         self.output_menu.configure(state="disabled")
+        self.scroll_frame.configure(state="disabled")
 
     def stop_voice_changer(self):
         self.voice_changer.stop()
@@ -359,6 +370,7 @@ class App(ctk.CTk):
         self.stop_button.configure(state="disabled")
         self.input_menu.configure(state="normal")
         self.output_menu.configure(state="normal")
+        self.scroll_frame.configure(state="normal")
 
     def on_closing(self):
         self.save_presets_to_file()
