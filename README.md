@@ -2,7 +2,7 @@
 
 V-Change is a real-time voice changing application for desktop, allowing you to modify your voice on-the-fly for applications like Discord, Skype, or online games. It uses a virtual audio cable (like VB-CABLE) to route your modified voice to any application's input.
 
-![V-Change Interface](https://ibb.co/TxCPqR1Z)
+![V-Change Interface](<img src="https://i.ibb.co/0RwYVZKk/image.png" alt="image" border="0">)
 
 ---
 
