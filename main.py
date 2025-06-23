@@ -1,6 +1,6 @@
 import pyaudio
 import numpy as np
-from pedalboard import Pedalboard, PitchShift, Reverb
+from pedalboard import Pedalboard, PitchShift, Reverb, Chorus, Delay
 import threading
 import customtkinter as ctk
 
@@ -21,22 +21,24 @@ class VoiceChanger:
         self.board = Pedalboard([])
         self.pitch_shifter = PitchShift(semitones=0)
         self.reverb = Reverb(room_size=0.0)
+        self.chorus = Chorus()
+        self.delay = Delay()
         
-        self.update_effects(pitch=0.0, reverb_on=False, room_size=0.0)
+        self.update_effects()
 
-    def update_effects(self, pitch=None, reverb_on=None, room_size=None):
-        if pitch is not None:
-            self.pitch_shifter.semitones = pitch
-        
-        if room_size is not None:
-            self.reverb.room_size = room_size
+    def update_effects(self, pitch=0.0, reverb_on=False, room_size=0.0, chorus_on=False, delay_on=False):
+        self.pitch_shifter.semitones = pitch
+        self.reverb.room_size = room_size
 
         new_board = []
-        if self.pitch_shifter.semitones != 0:
+        if pitch != 0:
             new_board.append(self.pitch_shifter)
-            
         if reverb_on:
             new_board.append(self.reverb)
+        if chorus_on:
+            new_board.append(self.chorus)
+        if delay_on:
+            new_board.append(self.delay)
 
         self.board.plugins = new_board
 
@@ -117,7 +119,7 @@ class App(ctk.CTk):
         self.voice_changer = VoiceChanger()
 
         self.title("V-Change")
-        self.geometry("500x550")
+        self.geometry("500x650")
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         ctk.set_appearance_mode("dark")
@@ -139,12 +141,18 @@ class App(ctk.CTk):
 
         self.pitch_label = ctk.CTkLabel(self.main_frame, text="Pitch Shift: 0.0")
         self.pitch_label.pack()
-        self.pitch_slider = ctk.CTkSlider(self.main_frame, from_=-12, to=12, number_of_steps=48, command=self.update_pitch)
+        self.pitch_slider = ctk.CTkSlider(self.main_frame, from_=-12, to=12, number_of_steps=48, command=self._update_all_effects)
         self.pitch_slider.set(0)
         self.pitch_slider.pack(padx=10, pady=(0,10), fill="x")
 
-        self.reverb_switch = ctk.CTkSwitch(self.main_frame, text="Reverb", command=self.toggle_reverb)
-        self.reverb_switch.pack(padx=10, pady=10)
+        self.effects_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        self.effects_frame.pack(pady=10)
+        self.reverb_switch = ctk.CTkSwitch(self.effects_frame, text="Reverb", command=self._update_all_effects)
+        self.reverb_switch.pack(side="left", padx=10)
+        self.chorus_switch = ctk.CTkSwitch(self.effects_frame, text="Chorus", command=self._update_all_effects)
+        self.chorus_switch.pack(side="left", padx=10)
+        self.delay_switch = ctk.CTkSwitch(self.effects_frame, text="Delay", command=self._update_all_effects)
+        self.delay_switch.pack(side="left", padx=10)
         
         self.presets_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         self.presets_frame.pack(pady=20)
@@ -153,10 +161,11 @@ class App(ctk.CTk):
         self.preset_buttons_frame = ctk.CTkFrame(self.presets_frame)
         self.preset_buttons_frame.pack(pady=10)
         
-        ctk.CTkButton(self.preset_buttons_frame, text="Deep Voice", command=lambda: self.apply_preset(pitch=-8)).pack(side="left", padx=5)
-        ctk.CTkButton(self.preset_buttons_frame, text="High Voice", command=lambda: self.apply_preset(pitch=8)).pack(side="left", padx=5)
-        ctk.CTkButton(self.preset_buttons_frame, text="Echo", command=lambda: self.apply_preset(pitch=0, reverb=True, room_size=0.7)).pack(side="left", padx=5)
-        ctk.CTkButton(self.preset_buttons_frame, text="Normal (Reset)", command=lambda: self.apply_preset(pitch=0, reverb=False)).pack(side="left", padx=5)
+        ctk.CTkButton(self.preset_buttons_frame, text="Deep", command=lambda: self.apply_preset(pitch=-7)).pack(side="left", padx=5)
+        ctk.CTkButton(self.preset_buttons_frame, text="High", command=lambda: self.apply_preset(pitch=7)).pack(side="left", padx=5)
+        ctk.CTkButton(self.preset_buttons_frame, text="Alien", command=lambda: self.apply_preset(pitch=4, chorus=True)).pack(side="left", padx=5)
+        ctk.CTkButton(self.preset_buttons_frame, text="Spacious", command=lambda: self.apply_preset(pitch=0, reverb=True, delay=True)).pack(side="left", padx=5)
+        ctk.CTkButton(self.preset_buttons_frame, text="Normal", command=lambda: self.apply_preset(pitch=0)).pack(side="left", padx=5)
 
         self.status_label = ctk.CTkLabel(self.main_frame, text="Status: Off", font=("Arial", 16))
         self.status_label.pack(pady=10)
@@ -169,26 +178,36 @@ class App(ctk.CTk):
 
         self.stop_button = ctk.CTkButton(self.button_frame, text="Stop", command=self.stop_voice_changer, state="disabled")
         self.stop_button.pack(side="left", padx=5)
+        
+    def _update_all_effects(self, pitch_value=None):
+        pitch = self.pitch_slider.get()
+        reverb_on = self.reverb_switch.get() == 1
+        chorus_on = self.chorus_switch.get() == 1
+        delay_on = self.delay_switch.get() == 1
+        
+        self.pitch_label.configure(text=f"Pitch Shift: {round(pitch, 2)}")
+        
+        self.voice_changer.update_effects(
+            pitch=pitch,
+            reverb_on=reverb_on,
+            room_size=0.7 if reverb_on else 0.0,
+            chorus_on=chorus_on,
+            delay_on=delay_on
+        )
 
-    def apply_preset(self, pitch, reverb=False, room_size=0.0):
+    def apply_preset(self, pitch, reverb=False, chorus=False, delay=False):
         self.pitch_slider.set(pitch)
-        self.update_pitch(pitch)
-        if reverb:
-            self.reverb_switch.select()
-        else:
-            self.reverb_switch.deselect()
-        self.voice_changer.update_effects(pitch=pitch, reverb_on=reverb, room_size=room_size)
-    
-    def toggle_reverb(self):
-        is_on = self.reverb_switch.get() == 1
-        current_pitch = self.pitch_slider.get()
-        self.voice_changer.update_effects(pitch=current_pitch, reverb_on=is_on, room_size=0.7 if is_on else 0.0)
+        
+        if reverb: self.reverb_switch.select()
+        else: self.reverb_switch.deselect()
 
-    def update_pitch(self, value):
-        pitch_value = round(value, 2)
-        self.pitch_label.configure(text=f"Pitch Shift: {pitch_value}")
-        is_on = self.reverb_switch.get() == 1
-        self.voice_changer.update_effects(pitch=pitch_value, reverb_on=is_on)
+        if chorus: self.chorus_switch.select()
+        else: self.chorus_switch.deselect()
+
+        if delay: self.delay_switch.select()
+        else: self.delay_switch.deselect()
+
+        self._update_all_effects()
 
     def start_voice_changer(self):
         self.voice_changer.start()
