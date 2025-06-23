@@ -1,6 +1,6 @@
 import pyaudio
 import numpy as np
-from pedalboard import Pedalboard, PitchShift, Reverb, Chorus, Delay
+from pedalboard import Pedalboard, PitchShift, Reverb, Chorus, Delay, HighpassFilter, LowpassFilter
 import threading
 import customtkinter as ctk
 import json
@@ -25,17 +25,27 @@ class VoiceChanger:
         
         self.board = Pedalboard([])
         self.pitch_shifter = PitchShift(semitones=0)
+        self.high_pass_filter = HighpassFilter(cutoff_frequency_hz=0)
+        self.low_pass_filter = LowpassFilter(cutoff_frequency_hz=22000)
         self.reverb = Reverb(room_size=0.0)
         self.chorus = Chorus(rate_hz=1.0)
         self.delay = Delay(delay_seconds=0.5, feedback=0.3)
         
         self.update_effects()
 
-    def update_effects(self, pitch=0.0, reverb_on=False, room_size=0.0, chorus_on=False, delay_on=False):
+    def update_effects(self, pitch=0.0, high_pass=0.0, low_pass=22000.0,
+                       reverb_on=False, room_size=0.0, chorus_on=False, delay_on=False):
+        
         self.pitch_shifter.semitones = pitch
+        self.high_pass_filter.cutoff_frequency_hz = high_pass
+        self.low_pass_filter.cutoff_frequency_hz = low_pass
         self.reverb.room_size = room_size
 
         new_board = []
+        if high_pass > 0:
+            new_board.append(self.high_pass_filter)
+        if low_pass < 22000:
+            new_board.append(self.low_pass_filter)
         if pitch != 0:
             new_board.append(self.pitch_shifter)
         if reverb_on:
@@ -132,89 +142,90 @@ class App(ctk.CTk):
         self.voice_changer.volume_callback = self.update_volume_meter
         self.presets = {}
         self.default_presets = {
-            "Normal": {"pitch": 0, "reverb_on": False, "room_size": 0, "chorus_on": False, "delay_on": False},
-            "Deep": {"pitch": -7, "reverb_on": False, "room_size": 0, "chorus_on": False, "delay_on": False},
-            "High": {"pitch": 7, "reverb_on": False, "room_size": 0, "chorus_on": False, "delay_on": False},
-            "Alien": {"pitch": 4, "reverb_on": False, "room_size": 0, "chorus_on": True, "delay_on": False},
-            "Spacious": {"pitch": 0, "reverb_on": True, "room_size": 0.8, "chorus_on": False, "delay_on": True},
+            "Normal": {"pitch": 0, "high_pass": 0, "low_pass": 22000, "reverb_on": False, "room_size": 0, "chorus_on": False, "delay_on": False},
+            "Lower Timbre": {"pitch": -2, "high_pass": 80, "low_pass": 8000, "reverb_on": False, "room_size": 0, "chorus_on": False, "delay_on": False},
+            "Higher Timbre": {"pitch": 2, "high_pass": 200, "low_pass": 12000, "reverb_on": False, "room_size": 0, "chorus_on": False, "delay_on": False},
+            "Clear Voice": {"pitch": 0, "high_pass": 120, "low_pass": 18000, "reverb_on": False, "room_size": 0, "chorus_on": False, "delay_on": False},
+            "Spacious": {"pitch": 0, "high_pass": 100, "low_pass": 20000, "reverb_on": True, "room_size": 0.8, "chorus_on": False, "delay_on": True},
         }
 
         self.title("V-Change")
-        self.geometry("500x600")
+        self.geometry("500x700")
         self.minsize(400, 500)
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
         ctk.set_appearance_mode("dark")
 
-        self.grid_rowconfigure(0, weight=1)
+        self.grid_rowconfigure(2, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
-        self.scroll_frame = ctk.CTkScrollableFrame(self)
-        self.scroll_frame.grid(row=0, column=0, padx=10, pady=(10, 0), sticky="nsew")
-        
+        # --- Top Frame for Global Controls ---
+        self.top_frame = ctk.CTkFrame(self)
+        self.top_frame.grid(row=0, column=0, padx=10, pady=(10,0), sticky="ew")
+
         devices = self.voice_changer.get_devices()
         input_devices = {dev['name']: dev['index'] for dev in devices if dev['maxInputChannels'] > 0}
         output_devices = {dev['name']: dev['index'] for dev in devices if dev['maxOutputChannels'] > 0}
         
-        ctk.CTkLabel(self.scroll_frame, text="Input Device (Microphone):").pack(anchor="w", padx=10, pady=(5,0))
-        self.input_menu = ctk.CTkOptionMenu(self.scroll_frame, values=list(input_devices.keys()), command=self.voice_changer.set_input_device)
-        self.input_menu.pack(padx=10, pady=(0, 10), fill="x")
+        ctk.CTkLabel(self.top_frame, text="Input:").pack(side="left", padx=(10,5))
+        self.input_menu = ctk.CTkOptionMenu(self.top_frame, values=list(input_devices.keys()), command=self.voice_changer.set_input_device, width=150)
+        self.input_menu.pack(side="left", padx=(0,10))
         
-        ctk.CTkLabel(self.scroll_frame, text="Output Device (Speaker/Virtual Cable):").pack(anchor="w", padx=10)
-        self.output_menu = ctk.CTkOptionMenu(self.scroll_frame, values=list(output_devices.keys()), command=self.voice_changer.set_output_device)
-        self.output_menu.pack(padx=10, pady=(0, 15), fill="x")
+        ctk.CTkLabel(self.top_frame, text="Output:").pack(side="left", padx=(10,5))
+        self.output_menu = ctk.CTkOptionMenu(self.top_frame, values=list(output_devices.keys()), command=self.voice_changer.set_output_device, width=150)
+        self.output_menu.pack(side="left", padx=(0,10))
         
-        ctk.CTkLabel(self.scroll_frame, text="Input Volume:").pack(anchor="w", padx=10)
-        self.volume_meter = ctk.CTkProgressBar(self.scroll_frame, progress_color="green")
+        self.volume_meter = ctk.CTkProgressBar(self.top_frame, progress_color="green", orientation="horizontal")
         self.volume_meter.set(0)
-        self.volume_meter.pack(padx=10, pady=(0,15), fill="x")
+        self.volume_meter.pack(side="left", padx=10, expand=True, fill="x")
 
-        self.controls_frame = ctk.CTkFrame(self.scroll_frame)
-        self.controls_frame.pack(fill="x", padx=10, pady=10)
+        # --- Tab View ---
+        self.tab_view = ctk.CTkTabview(self)
+        self.tab_view.grid(row=2, column=0, padx=10, pady=5, sticky="nsew")
+        self.shaping_tab = self.tab_view.add("Voice Shaping")
+        self.fx_tab = self.tab_view.add("Ambience & FX")
         
-        self.pitch_label = ctk.CTkLabel(self.controls_frame, text="Pitch Shift: 0.0")
-        self.pitch_label.pack()
-        self.pitch_slider = ctk.CTkSlider(self.controls_frame, from_=-12, to=12, number_of_steps=48, command=self._update_all_effects)
-        self.pitch_slider.pack(padx=10, pady=(0,10), fill="x")
+        # --- Voice Shaping Tab Content ---
+        self.pitch_label = ctk.CTkLabel(self.shaping_tab, text="Pitch Shift: 0.0")
+        self.pitch_label.pack(padx=10, pady=(10,0))
+        self.pitch_slider = ctk.CTkSlider(self.shaping_tab, from_=-12, to=12, number_of_steps=48, command=self._update_all_effects)
+        self.pitch_slider.pack(padx=10, pady=(0,15), fill="x")
 
-        self.reverb_label = ctk.CTkLabel(self.controls_frame, text="Reverb Room Size: 0.0")
-        self.reverb_label.pack()
-        self.reverb_slider = ctk.CTkSlider(self.controls_frame, from_=0, to=1, command=self._update_all_effects)
-        self.reverb_slider.pack(padx=10, pady=(0,10), fill="x")
+        self.high_pass_label = ctk.CTkLabel(self.shaping_tab, text="High-Pass (Cuts Lows): 0 Hz")
+        self.high_pass_label.pack(padx=10, pady=(10,0))
+        self.high_pass_slider = ctk.CTkSlider(self.shaping_tab, from_=0, to=2000, command=self._update_all_effects)
+        self.high_pass_slider.pack(padx=10, pady=(0,15), fill="x")
 
-        self.effects_frame = ctk.CTkFrame(self.controls_frame, fg_color="transparent")
-        self.effects_frame.pack(pady=10)
-        self.reverb_switch = ctk.CTkSwitch(self.effects_frame, text="Reverb", command=self._update_all_effects)
-        self.reverb_switch.pack(side="left", padx=10, expand=True)
-        self.chorus_switch = ctk.CTkSwitch(self.effects_frame, text="Chorus", command=self._update_all_effects)
-        self.chorus_switch.pack(side="left", padx=10, expand=True)
-        self.delay_switch = ctk.CTkSwitch(self.effects_frame, text="Delay", command=self._update_all_effects)
-        self.delay_switch.pack(side="left", padx=10, expand=True)
+        self.low_pass_label = ctk.CTkLabel(self.shaping_tab, text="Low-Pass (Cuts Highs): 22000 Hz")
+        self.low_pass_label.pack(padx=10, pady=(10,0))
+        self.low_pass_slider = ctk.CTkSlider(self.shaping_tab, from_=500, to=22000, command=self._update_all_effects)
+        self.low_pass_slider.pack(padx=10, pady=(0,15), fill="x")
         
-        self.presets_frame = ctk.CTkFrame(self.scroll_frame)
-        self.presets_frame.pack(fill="x", padx=10, pady=10)
-        
-        ctk.CTkLabel(self.presets_frame, text="Quick Presets").pack()
-        self.quick_presets_frame = ctk.CTkFrame(self.presets_frame, fg_color="transparent")
-        self.quick_presets_frame.pack(pady=(5,10), fill="x")
-        self.quick_presets_frame.grid_columnconfigure((0, 1, 2), weight=1)
-        ctk.CTkButton(self.quick_presets_frame, text="Normal", command=lambda: self.apply_preset_by_name("Normal")).grid(row=0, column=0, padx=2, pady=2, sticky="ew")
-        ctk.CTkButton(self.quick_presets_frame, text="Deep", command=lambda: self.apply_preset_by_name("Deep")).grid(row=0, column=1, padx=2, pady=2, sticky="ew")
-        ctk.CTkButton(self.quick_presets_frame, text="High", command=lambda: self.apply_preset_by_name("High")).grid(row=0, column=2, padx=2, pady=2, sticky="ew")
-        ctk.CTkButton(self.quick_presets_frame, text="Alien", command=lambda: self.apply_preset_by_name("Alien")).grid(row=1, column=0, padx=2, pady=2, sticky="ew")
-        ctk.CTkButton(self.quick_presets_frame, text="Spacious", command=lambda: self.apply_preset_by_name("Spacious")).grid(row=1, column=1, columnspan=2, padx=2, pady=2, sticky="ew")
+        self.reverb_switch = ctk.CTkSwitch(self.fx_tab, text="Reverb", command=self._update_all_effects)
+        self.reverb_switch.pack(padx=10, pady=10, anchor="w")
+        self.reverb_slider = ctk.CTkSlider(self.fx_tab, from_=0, to=1, command=self._update_all_effects)
+        self.reverb_slider.pack(padx=10, pady=(0,15), fill="x")
 
-        ctk.CTkLabel(self.presets_frame, text="All Presets (Load/Save)").pack()
+        self.chorus_switch = ctk.CTkSwitch(self.fx_tab, text="Chorus", command=self._update_all_effects)
+        self.chorus_switch.pack(padx=10, pady=10, anchor="w")
+
+        self.delay_switch = ctk.CTkSwitch(self.fx_tab, text="Delay", command=self._update_all_effects)
+        self.delay_switch.pack(padx=10, pady=10, anchor="w")
+
+        self.presets_frame = ctk.CTkFrame(self)
+        self.presets_frame.grid(row=1, column=0, padx=10, pady=5, sticky="ew")
+        self.presets_frame.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(self.presets_frame, text="Presets").pack()
         self.preset_menu = ctk.CTkOptionMenu(self.presets_frame, values=["Normal"], command=self.apply_preset_by_name)
         self.preset_menu.pack(pady=5, padx=10, fill="x")
-        
         self.preset_buttons_frame = ctk.CTkFrame(self.presets_frame, fg_color="transparent")
         self.preset_buttons_frame.pack(pady=5, padx=10, fill="x")
         self.preset_buttons_frame.grid_columnconfigure((0, 1), weight=1)
         ctk.CTkButton(self.preset_buttons_frame, text="Save Current", command=self.save_current_preset).grid(row=0, column=0, padx=(0, 5), sticky="ew")
-        ctk.CTkButton(self.preset_buttons_frame, text="Delete Preset...", command=self.open_delete_preset_dialog).grid(row=0, column=1, padx=(5, 0), sticky="ew")
+        ctk.CTkButton(self.preset_buttons_frame, text="Delete Preset", command=self.open_delete_preset_dialog).grid(row=0, column=1, padx=(5, 0), sticky="ew")
 
+        # --- Footer Frame ---
         self.footer_frame = ctk.CTkFrame(self, height=100)
-        self.footer_frame.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
+        self.footer_frame.grid(row=3, column=0, padx=10, pady=10, sticky="ew")
         self.footer_frame.grid_columnconfigure(0, weight=1)
 
         self.status_label = ctk.CTkLabel(self.footer_frame, text="Status: Off", font=("Arial", 16))
@@ -231,21 +242,22 @@ class App(ctk.CTk):
 
     def _update_all_effects(self, *args):
         pitch = self.pitch_slider.get()
+        high_pass = self.high_pass_slider.get()
+        low_pass = self.low_pass_slider.get()
         reverb_on = self.reverb_switch.get() == 1
+        room_size = self.reverb_slider.get()
         chorus_on = self.chorus_switch.get() == 1
         delay_on = self.delay_switch.get() == 1
-        room_size = self.reverb_slider.get()
 
         self.pitch_label.configure(text=f"Pitch Shift: {round(pitch, 2)}")
-        self.reverb_label.configure(text=f"Reverb Room Size: {round(room_size, 2)}")
+        self.high_pass_label.configure(text=f"High-Pass (Cuts Lows): {int(high_pass)} Hz")
+        self.low_pass_label.configure(text=f"Low-Pass (Cuts Highs): {int(low_pass)} Hz")
         self.reverb_slider.configure(state="normal" if reverb_on else "disabled")
 
         self.voice_changer.update_effects(
-            pitch=pitch,
-            reverb_on=reverb_on,
-            room_size=room_size if reverb_on else 0.0,
-            chorus_on=chorus_on,
-            delay_on=delay_on)
+            pitch=pitch, high_pass=high_pass, low_pass=low_pass,
+            reverb_on=reverb_on, room_size=room_size,
+            chorus_on=chorus_on, delay_on=delay_on)
 
     def update_volume_meter(self, rms_val):
         normalized_volume = min(rms_val / 5000.0, 1.0)
@@ -256,6 +268,8 @@ class App(ctk.CTk):
             self.preset_menu.set(name)
             preset = self.presets[name]
             self.pitch_slider.set(preset.get("pitch", 0))
+            self.high_pass_slider.set(preset.get("high_pass", 0))
+            self.low_pass_slider.set(preset.get("low_pass", 22000))
             self.reverb_slider.set(preset.get("room_size", 0))
             
             if preset.get("reverb_on", False): self.reverb_switch.select()
@@ -275,6 +289,8 @@ class App(ctk.CTk):
         if name and name not in self.presets:
             self.presets[name] = {
                 "pitch": self.pitch_slider.get(),
+                "high_pass": self.high_pass_slider.get(),
+                "low_pass": self.low_pass_slider.get(),
                 "reverb_on": self.reverb_switch.get() == 1,
                 "room_size": self.reverb_slider.get(),
                 "chorus_on": self.chorus_switch.get() == 1,
@@ -288,12 +304,6 @@ class App(ctk.CTk):
         deletable_presets = [p for p in self.presets.keys() if p not in self.default_presets]
 
         if not deletable_presets:
-            dialog = ctk.CTkToplevel(self)
-            dialog.geometry("300x100")
-            dialog.title("Info")
-            ctk.CTkLabel(dialog, text="No custom presets to delete.").pack(pady=10, padx=10)
-            ctk.CTkButton(dialog, text="OK", command=dialog.destroy).pack(pady=10)
-            dialog.grab_set()
             return
 
         dialog = ctk.CTkToplevel(self)
@@ -302,7 +312,6 @@ class App(ctk.CTk):
         dialog.grab_set()
 
         ctk.CTkLabel(dialog, text="Select preset to delete:").pack(padx=20, pady=(10, 0))
-
         preset_to_delete_var = ctk.StringVar(value=deletable_presets[0])
         option_menu = ctk.CTkOptionMenu(dialog, variable=preset_to_delete_var, values=deletable_presets)
         option_menu.pack(padx=20, pady=10, fill="x")
@@ -317,40 +326,31 @@ class App(ctk.CTk):
 
         button_frame = ctk.CTkFrame(dialog, fg_color="transparent")
         button_frame.pack(pady=10)
-
         ctk.CTkButton(button_frame, text="Delete", command=confirm_delete).pack(side="left", padx=10)
         ctk.CTkButton(button_frame, text="Cancel", command=dialog.destroy).pack(side="left", padx=10)
 
-    def delete_selected_preset(self):
-        name = self.preset_menu.get()
-        if name and name in self.presets and name not in self.default_presets:
-            del self.presets[name]
-            self.save_presets_to_file()
-            self.update_preset_menu()
-
     def update_preset_menu(self):
         self.preset_menu.configure(values=list(self.presets.keys()))
-        if self.presets:
+        if self.presets and self.preset_menu.get() not in self.presets:
             self.preset_menu.set(list(self.presets.keys())[0])
-        else:
-            self.preset_menu.set("")
             
     def load_presets(self):
+        self.presets = self.default_presets.copy()
         if os.path.exists(PRESETS_FILE):
             try:
                 with open(PRESETS_FILE, "r") as f:
-                    self.presets = json.load(f)
+                    user_presets = json.load(f)
+                    self.presets.update(user_presets)
             except (json.JSONDecodeError, IOError):
-                self.presets = self.default_presets.copy()
-        else:
-            self.presets = self.default_presets.copy()
+                pass 
         self.update_preset_menu()
         self.apply_preset_by_name("Normal")
 
     def save_presets_to_file(self):
+        user_presets = {k: v for k, v in self.presets.items() if k not in self.default_presets}
         try:
             with open(PRESETS_FILE, "w") as f:
-                json.dump(self.presets, f, indent=4)
+                json.dump(user_presets, f, indent=4)
         except IOError:
             pass
 
@@ -361,7 +361,8 @@ class App(ctk.CTk):
         self.stop_button.configure(state="normal")
         self.input_menu.configure(state="disabled")
         self.output_menu.configure(state="disabled")
-        self.scroll_frame.configure(state="disabled")
+        self.tab_view.configure(state="disabled")
+        self.presets_frame.configure(state="disabled")
 
     def stop_voice_changer(self):
         self.voice_changer.stop()
@@ -370,7 +371,8 @@ class App(ctk.CTk):
         self.stop_button.configure(state="disabled")
         self.input_menu.configure(state="normal")
         self.output_menu.configure(state="normal")
-        self.scroll_frame.configure(state="normal")
+        self.tab_view.configure(state="normal")
+        self.presets_frame.configure(state="normal")
 
     def on_closing(self):
         self.save_presets_to_file()
