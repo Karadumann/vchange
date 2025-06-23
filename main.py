@@ -3,12 +3,17 @@ import numpy as np
 from pedalboard import Pedalboard, PitchShift, Reverb, Chorus, Delay
 import threading
 import customtkinter as ctk
+import json
+import os
+
+PRESETS_FILE = "presets.json"
 
 class VoiceChanger:
     def __init__(self):
         self.p = pyaudio.PyAudio()
         self.stream_active = False
         self.thread = None
+        self.volume_callback = None
 
         self.CHUNK = 1024
         self.FORMAT = pyaudio.paInt16
@@ -21,8 +26,8 @@ class VoiceChanger:
         self.board = Pedalboard([])
         self.pitch_shifter = PitchShift(semitones=0)
         self.reverb = Reverb(room_size=0.0)
-        self.chorus = Chorus()
-        self.delay = Delay()
+        self.chorus = Chorus(rate_hz=1.0)
+        self.delay = Delay(delay_seconds=0.5, feedback=0.3)
         
         self.update_effects()
 
@@ -84,12 +89,18 @@ class VoiceChanger:
                                      output_device_index=self.output_device_index)
         except OSError:
             self.stream_active = False
+            if self.volume_callback: self.volume_callback(0)
             return
 
         while self.stream_active:
             try:
                 data_in = stream_in.read(self.CHUNK, exception_on_overflow=False)
                 audio_data_int16 = np.frombuffer(data_in, dtype=np.int16)
+                
+                if self.volume_callback:
+                    rms = np.sqrt(np.mean(audio_data_int16.astype(np.float64)**2))
+                    self.volume_callback(rms)
+
                 audio_data_float32 = audio_data_int16.astype(np.float32) / 32767.0
                 
                 if len(self.board.plugins) > 0:
@@ -103,6 +114,7 @@ class VoiceChanger:
             except IOError:
                 self.stream_active = False
 
+        if self.volume_callback: self.volume_callback(0)
         stream_in.stop_stream()
         stream_in.close()
         stream_out.stop_stream()
@@ -117,35 +129,57 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.voice_changer = VoiceChanger()
+        self.voice_changer.volume_callback = self.update_volume_meter
+        self.presets = {}
+        self.default_presets = {
+            "Normal": {"pitch": 0, "reverb_on": False, "room_size": 0, "chorus_on": False, "delay_on": False},
+            "Deep": {"pitch": -7, "reverb_on": False, "room_size": 0, "chorus_on": False, "delay_on": False},
+            "High": {"pitch": 7, "reverb_on": False, "room_size": 0, "chorus_on": False, "delay_on": False},
+            "Alien": {"pitch": 4, "reverb_on": False, "room_size": 0, "chorus_on": True, "delay_on": False},
+            "Spacious": {"pitch": 0, "reverb_on": True, "room_size": 0.8, "chorus_on": False, "delay_on": True},
+        }
 
         self.title("V-Change")
-        self.geometry("500x650")
+        self.geometry("500x750")
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
-
         ctk.set_appearance_mode("dark")
+
+        self.main_frame = ctk.CTkFrame(self)
+        self.main_frame.pack(padx=20, pady=20, fill="both", expand=True)
 
         devices = self.voice_changer.get_devices()
         input_devices = {dev['name']: dev['index'] for dev in devices if dev['maxInputChannels'] > 0}
         output_devices = {dev['name']: dev['index'] for dev in devices if dev['maxOutputChannels'] > 0}
-
-        self.main_frame = ctk.CTkFrame(self)
-        self.main_frame.pack(padx=20, pady=20, fill="both", expand=True)
         
         ctk.CTkLabel(self.main_frame, text="Input Device (Microphone):").pack(anchor="w", padx=10)
-        self.input_menu = ctk.CTkOptionMenu(self.main_frame, values=list(input_devices.keys()), command=lambda name: self.voice_changer.set_input_device(input_devices[name]))
+        self.input_menu = ctk.CTkOptionMenu(self.main_frame, values=list(input_devices.keys()), command=self.voice_changer.set_input_device)
         self.input_menu.pack(padx=10, pady=(0, 10), fill="x")
         
         ctk.CTkLabel(self.main_frame, text="Output Device (Speaker/Virtual Cable):").pack(anchor="w", padx=10)
-        self.output_menu = ctk.CTkOptionMenu(self.main_frame, values=list(output_devices.keys()), command=lambda name: self.voice_changer.set_output_device(output_devices[name]))
+        self.output_menu = ctk.CTkOptionMenu(self.main_frame, values=list(output_devices.keys()), command=self.voice_changer.set_output_device)
         self.output_menu.pack(padx=10, pady=(0, 20), fill="x")
+        
+        ctk.CTkLabel(self.main_frame, text="Input Volume:").pack(anchor="w", padx=10, pady=(10,0))
+        self.volume_meter = ctk.CTkProgressBar(self.main_frame, progress_color="green")
+        self.volume_meter.set(0)
+        self.volume_meter.pack(padx=10, pady=(0,20), fill="x")
 
-        self.pitch_label = ctk.CTkLabel(self.main_frame, text="Pitch Shift: 0.0")
+        self.controls_frame = ctk.CTkFrame(self.main_frame)
+        self.controls_frame.pack(fill="x", padx=10, pady=10)
+        
+        self.pitch_label = ctk.CTkLabel(self.controls_frame, text="Pitch Shift: 0.0")
         self.pitch_label.pack()
-        self.pitch_slider = ctk.CTkSlider(self.main_frame, from_=-12, to=12, number_of_steps=48, command=self._update_all_effects)
+        self.pitch_slider = ctk.CTkSlider(self.controls_frame, from_=-12, to=12, number_of_steps=48, command=self._update_all_effects)
         self.pitch_slider.set(0)
         self.pitch_slider.pack(padx=10, pady=(0,10), fill="x")
 
-        self.effects_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        self.reverb_label = ctk.CTkLabel(self.controls_frame, text="Reverb Room Size: 0.0")
+        self.reverb_label.pack()
+        self.reverb_slider = ctk.CTkSlider(self.controls_frame, from_=0, to=1, command=self._update_all_effects)
+        self.reverb_slider.set(0)
+        self.reverb_slider.pack(padx=10, pady=(0,10), fill="x")
+
+        self.effects_frame = ctk.CTkFrame(self.controls_frame, fg_color="transparent")
         self.effects_frame.pack(pady=10)
         self.reverb_switch = ctk.CTkSwitch(self.effects_frame, text="Reverb", command=self._update_all_effects)
         self.reverb_switch.pack(side="left", padx=10)
@@ -154,60 +188,161 @@ class App(ctk.CTk):
         self.delay_switch = ctk.CTkSwitch(self.effects_frame, text="Delay", command=self._update_all_effects)
         self.delay_switch.pack(side="left", padx=10)
         
-        self.presets_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        self.presets_frame.pack(pady=20)
-        ctk.CTkLabel(self.presets_frame, text="Presets").pack()
+        self.presets_frame = ctk.CTkFrame(self.main_frame)
+        self.presets_frame.pack(fill="x", padx=10, pady=10)
         
-        self.preset_buttons_frame = ctk.CTkFrame(self.presets_frame)
-        self.preset_buttons_frame.pack(pady=10)
+        ctk.CTkLabel(self.presets_frame, text="Quick Presets").pack()
+        self.quick_presets_frame = ctk.CTkFrame(self.presets_frame, fg_color="transparent")
+        self.quick_presets_frame.pack(pady=(5,10))
+        ctk.CTkButton(self.quick_presets_frame, text="Normal", command=lambda: self.apply_preset_by_name("Normal")).pack(side="left", padx=5)
+        ctk.CTkButton(self.quick_presets_frame, text="Deep", command=lambda: self.apply_preset_by_name("Deep")).pack(side="left", padx=5)
+        ctk.CTkButton(self.quick_presets_frame, text="High", command=lambda: self.apply_preset_by_name("High")).pack(side="left", padx=5)
+        ctk.CTkButton(self.quick_presets_frame, text="Alien", command=lambda: self.apply_preset_by_name("Alien")).pack(side="left", padx=5)
+        ctk.CTkButton(self.quick_presets_frame, text="Spacious", command=lambda: self.apply_preset_by_name("Spacious")).pack(side="left", padx=5)
+
+        ctk.CTkLabel(self.presets_frame, text="All Presets (Load/Save)").pack()
+        self.preset_menu = ctk.CTkOptionMenu(self.presets_frame, values=["Normal"], command=self.apply_preset_by_name)
+        self.preset_menu.pack(pady=5, padx=10, fill="x")
         
-        ctk.CTkButton(self.preset_buttons_frame, text="Deep", command=lambda: self.apply_preset(pitch=-7)).pack(side="left", padx=5)
-        ctk.CTkButton(self.preset_buttons_frame, text="High", command=lambda: self.apply_preset(pitch=7)).pack(side="left", padx=5)
-        ctk.CTkButton(self.preset_buttons_frame, text="Alien", command=lambda: self.apply_preset(pitch=4, chorus=True)).pack(side="left", padx=5)
-        ctk.CTkButton(self.preset_buttons_frame, text="Spacious", command=lambda: self.apply_preset(pitch=0, reverb=True, delay=True)).pack(side="left", padx=5)
-        ctk.CTkButton(self.preset_buttons_frame, text="Normal", command=lambda: self.apply_preset(pitch=0)).pack(side="left", padx=5)
+        self.preset_buttons_frame = ctk.CTkFrame(self.presets_frame, fg_color="transparent")
+        ctk.CTkButton(self.preset_buttons_frame, text="Save Current", command=self.save_current_preset).pack(side="left", padx=5)
+        ctk.CTkButton(self.preset_buttons_frame, text="Delete Preset...", command=self.open_delete_preset_dialog).pack(side="left", padx=5)
 
         self.status_label = ctk.CTkLabel(self.main_frame, text="Status: Off", font=("Arial", 16))
         self.status_label.pack(pady=10)
-        
-        self.button_frame = ctk.CTkFrame(self.main_frame)
+        self.button_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         self.button_frame.pack(pady=10)
-
         self.start_button = ctk.CTkButton(self.button_frame, text="Start", command=self.start_voice_changer)
         self.start_button.pack(side="left", padx=5)
-
         self.stop_button = ctk.CTkButton(self.button_frame, text="Stop", command=self.stop_voice_changer, state="disabled")
         self.stop_button.pack(side="left", padx=5)
         
-    def _update_all_effects(self, pitch_value=None):
+        self.load_presets()
+
+    def _update_all_effects(self, *args):
         pitch = self.pitch_slider.get()
         reverb_on = self.reverb_switch.get() == 1
         chorus_on = self.chorus_switch.get() == 1
         delay_on = self.delay_switch.get() == 1
-        
+        room_size = self.reverb_slider.get()
+
         self.pitch_label.configure(text=f"Pitch Shift: {round(pitch, 2)}")
-        
+        self.reverb_label.configure(text=f"Reverb Room Size: {round(room_size, 2)}")
+        self.reverb_slider.configure(state="normal" if reverb_on else "disabled")
+
         self.voice_changer.update_effects(
             pitch=pitch,
             reverb_on=reverb_on,
-            room_size=0.7 if reverb_on else 0.0,
+            room_size=room_size if reverb_on else 0.0,
             chorus_on=chorus_on,
-            delay_on=delay_on
-        )
+            delay_on=delay_on)
 
-    def apply_preset(self, pitch, reverb=False, chorus=False, delay=False):
-        self.pitch_slider.set(pitch)
-        
-        if reverb: self.reverb_switch.select()
-        else: self.reverb_switch.deselect()
+    def update_volume_meter(self, rms_val):
+        normalized_volume = min(rms_val / 5000.0, 1.0)
+        self.after(0, lambda: self.volume_meter.set(normalized_volume))
 
-        if chorus: self.chorus_switch.select()
-        else: self.chorus_switch.deselect()
+    def apply_preset_by_name(self, name):
+        if name in self.presets:
+            self.preset_menu.set(name)
+            preset = self.presets[name]
+            self.pitch_slider.set(preset.get("pitch", 0))
+            self.reverb_slider.set(preset.get("room_size", 0))
+            
+            if preset.get("reverb_on", False): self.reverb_switch.select()
+            else: self.reverb_switch.deselect()
+            
+            if preset.get("chorus_on", False): self.chorus_switch.select()
+            else: self.chorus_switch.deselect()
 
-        if delay: self.delay_switch.select()
-        else: self.delay_switch.deselect()
+            if preset.get("delay_on", False): self.delay_switch.select()
+            else: self.delay_switch.deselect()
+            
+            self._update_all_effects()
 
-        self._update_all_effects()
+    def save_current_preset(self):
+        dialog = ctk.CTkInputDialog(text="Enter preset name:", title="Save Preset")
+        name = dialog.get_input()
+        if name and name not in self.presets:
+            self.presets[name] = {
+                "pitch": self.pitch_slider.get(),
+                "reverb_on": self.reverb_switch.get() == 1,
+                "room_size": self.reverb_slider.get(),
+                "chorus_on": self.chorus_switch.get() == 1,
+                "delay_on": self.delay_switch.get() == 1,
+            }
+            self.save_presets_to_file()
+            self.update_preset_menu()
+            self.preset_menu.set(name)
+
+    def open_delete_preset_dialog(self):
+        deletable_presets = [p for p in self.presets.keys() if p not in self.default_presets]
+
+        if not deletable_presets:
+            dialog = ctk.CTkToplevel(self)
+            dialog.geometry("300x100")
+            dialog.title("Info")
+            ctk.CTkLabel(dialog, text="No custom presets to delete.").pack(pady=10, padx=10)
+            ctk.CTkButton(dialog, text="OK", command=dialog.destroy).pack(pady=10)
+            dialog.grab_set()
+            return
+
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Delete Preset")
+        dialog.geometry("300x150")
+        dialog.grab_set()
+
+        ctk.CTkLabel(dialog, text="Select preset to delete:").pack(padx=20, pady=(10, 0))
+
+        preset_to_delete_var = ctk.StringVar(value=deletable_presets[0])
+        option_menu = ctk.CTkOptionMenu(dialog, variable=preset_to_delete_var, values=deletable_presets)
+        option_menu.pack(padx=20, pady=10, fill="x")
+
+        def confirm_delete():
+            name_to_delete = preset_to_delete_var.get()
+            if name_to_delete in self.presets:
+                del self.presets[name_to_delete]
+                self.save_presets_to_file()
+                self.update_preset_menu()
+            dialog.destroy()
+
+        button_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+        button_frame.pack(pady=10)
+
+        ctk.CTkButton(button_frame, text="Delete", command=confirm_delete).pack(side="left", padx=10)
+        ctk.CTkButton(button_frame, text="Cancel", command=dialog.destroy).pack(side="left", padx=10)
+
+    def delete_selected_preset(self):
+        name = self.preset_menu.get()
+        if name and name in self.presets and name not in self.default_presets:
+            del self.presets[name]
+            self.save_presets_to_file()
+            self.update_preset_menu()
+
+    def update_preset_menu(self):
+        self.preset_menu.configure(values=list(self.presets.keys()))
+        if self.presets:
+            self.preset_menu.set(list(self.presets.keys())[0])
+        else:
+            self.preset_menu.set("")
+            
+    def load_presets(self):
+        if os.path.exists(PRESETS_FILE):
+            try:
+                with open(PRESETS_FILE, "r") as f:
+                    self.presets = json.load(f)
+            except (json.JSONDecodeError, IOError):
+                self.presets = self.default_presets.copy()
+        else:
+            self.presets = self.default_presets.copy()
+        self.update_preset_menu()
+        self.apply_preset_by_name("Normal")
+
+    def save_presets_to_file(self):
+        try:
+            with open(PRESETS_FILE, "w") as f:
+                json.dump(self.presets, f, indent=4)
+        except IOError:
+            pass
 
     def start_voice_changer(self):
         self.voice_changer.start()
@@ -226,6 +361,7 @@ class App(ctk.CTk):
         self.output_menu.configure(state="normal")
 
     def on_closing(self):
+        self.save_presets_to_file()
         self.voice_changer.stop()
         self.destroy()
 
