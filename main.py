@@ -57,8 +57,15 @@ class VoiceChanger:
 
         self.board.plugins = new_board
 
-    def set_input_device(self, index):
-        self.input_device_index = index
+    def set_input_device(self, device_name):
+        if isinstance(device_name, str):
+            devices = self.get_devices()
+            input_devices = {dev['name']: dev['index'] for dev in devices if dev['maxInputChannels'] > 0}
+            index = input_devices.get(device_name)
+            if index is not None:
+                self.input_device_index = index
+        else:
+            self.input_device_index = device_name
 
     def set_output_device(self, index):
         self.output_device_index = index
@@ -399,7 +406,6 @@ class App(ctk.CTk):
         self.input_menu.configure(state="disabled")
         self.output_menu.configure(state="disabled")
         self.tab_view.configure(state="disabled")
-        self.presets_frame.configure(state="disabled")
 
     def stop_voice_changer(self):
         self.voice_changer.stop()
@@ -410,7 +416,6 @@ class App(ctk.CTk):
         if self.test_switch.get() == 0:
             self.output_menu.configure(state="normal")
         self.tab_view.configure(state="normal")
-        self.presets_frame.configure(state="normal")
 
     def on_closing(self):
         self.save_presets_to_file()
